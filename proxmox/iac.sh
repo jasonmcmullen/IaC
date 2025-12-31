@@ -3,80 +3,75 @@ set -euo pipefail
 
 ### --- CONFIG ---
 VM_NAME="iac-vm"
-STORAGE="local-lvm"       # VM Disk Storage
-ISO_STORAGE="local"       # ISO Storage ID (usually 'local')
+STORAGE="local-lvm"
+ISO_STORAGE="local"
 BRIDGE="vmbr0"
-DISK_SIZE="16"            # GB (Integer only)
+DISK_SIZE="16"            
 MEMORY="4096"
 CORES="2"
-ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
+
+# UPDATED TO WORKING 22.04.5 URL
+ISO_NAME="ubuntu-22.04.5-live-server-amd64.iso"
 ISO_URL="https://releases.ubuntu.com/22.04/$ISO_NAME"
 ### --------------
 
-# 1. ISO VALIDATION & READINESS
+# 1. ISO READINESS (The "Zero Byte" Killer)
 EXPECTED_ISO_DIR="/var/lib/vz/template/iso"
 mkdir -p "$EXPECTED_ISO_DIR"
 ISO_PATH="$EXPECTED_ISO_DIR/$ISO_NAME"
 
-echo "▶ Validating ISO file..."
+echo "▶ Checking ISO status..."
 
-# FIX: If file is 0 bytes or missing, download it
+# If file is 0 bytes, it was a failed download. Delete it.
 if [ -f "$ISO_PATH" ] && [ ! -s "$ISO_PATH" ]; then
-    echo "× Found 0-byte ISO file. Deleting and re-downloading..."
+    echo "× Detected 0-byte file (404 error). Deleting..."
     rm "$ISO_PATH"
 fi
 
+# Download if missing
 if [ ! -f "$ISO_PATH" ]; then
-    echo "▶ ISO not found. Downloading (this may take a few minutes)..."
-    wget -q --show-progress -O "$ISO_PATH" "$ISO_URL"
-    # Double check after download
-    if [ ! -s "$ISO_PATH" ]; then
-        echo "× ERROR: Download failed or resulted in 0-byte file. Check your internet connection."
+    echo "▶ Downloading $ISO_NAME..."
+    if ! wget -q --show-progress -O "$ISO_PATH" "$ISO_URL"; then
+        echo "× ERROR: Download failed. The URL might have changed again."
+        echo "Check: https://releases.ubuntu.com/22.04/"
+        rm -f "$ISO_PATH"
         exit 1
     fi
 fi
-echo "✔ ISO ready: $(du -h "$ISO_PATH" | cut -f1)"
+echo "✔ ISO verified: $(du -h "$ISO_PATH" | cut -f1)"
 
-# 2. VM PROVISIONING
+# 2. VM CREATION
 VMID=$(pvesh get /cluster/nextid)
-echo "▶ Using VMID: $VMID"
+echo "▶ Creating VM $VMID..."
 
-echo "▶ Creating VM container..."
 qm create $VMID --name "$VM_NAME" --cores "$CORES" --memory "$MEMORY" \
     --net0 virtio,bridge="$BRIDGE" --scsihw virtio-scsi-pci --onboot 1
 
 # THE "16G" PARSE FIX
-echo "▶ Allocating $DISK_SIZE GB disk on $STORAGE..."
 qm set $VMID --scsi0 "$STORAGE:$DISK_SIZE"
 
-echo "▶ Mounting ISO and setting boot order..."
+# THE "VOLUME DOES NOT EXIST" FIX
 qm set $VMID --ide2 "$ISO_STORAGE:iso/$ISO_NAME,media=cdrom"
 qm set $VMID --boot order="ide2;scsi0"
 
-# 3. START & WAIT FOR INSTALL
-echo "▶ Starting VM $VMID..."
+# 3. START & WAIT
 qm start $VMID
-
 echo "------------------------------------------------------------"
-echo "!! ACTION REQUIRED !!"
-echo "1. Open the Proxmox Console for VM $VMID."
-echo "2. Complete the Ubuntu installation manually."
-echo "3. REBOOT the VM after installation is finished."
+echo "VM $VMID is now running."
+echo "1. Complete the Ubuntu install in the Proxmox Console."
+echo "2. REBOOT when finished."
 echo "------------------------------------------------------------"
-read -p "Press [Enter] ONLY after you have finished the OS install and the VM has rebooted..."
+read -p "Press [Enter] after the VM has rebooted and is ready for SSH..."
 
-# 4. SSH AVAILABILITY CHECK
-read -p "Enter the VM's IP address: " VM_IP
+# 4. SSH & DEPLOY
+read -p "Enter VM IP Address: " VM_IP
 SSH_USER="ubuntu"
 
 echo -n "▶ Waiting for SSH on $VM_IP ."
-until nc -z -w3 "$VM_IP" 22 >/dev/null 2>&1; do
-    echo -n "."
-    sleep 5
-done
-echo -e "\n✔ Connected! Starting IaC stack deployment..."
+until nc -z -w3 "$VM_IP" 22 >/dev/null 2>&1; do echo -n "."; sleep 5; done
+echo -e "\n✔ Connected!"
 
-# 5. REMOTE DEPLOYMENT
+# Credentials
 ADMIN_PASS=$(openssl rand -base64 12)
 API_TOKEN=$(openssl rand -hex 16)
 
@@ -93,14 +88,8 @@ echo "API_TOKEN=${API_TOKEN}" >> .env
 sudo docker compose up -d
 EOF
 
-# 6. POST-INSTALL HARDWARE CLEANUP
-echo "▶ Ejecting installer ISO and setting boot to Disk..."
+# 5. CLEANUP
 qm set $VMID --ide2 none,media=cdrom
 qm set $VMID --boot order="scsi0"
 
-echo "------------------------------------------------------------"
-echo "✔ IaC Deployment Complete!"
-echo "✔ URL: http://$VM_IP"
-echo "✔ ADMIN_PASS: $ADMIN_PASS"
-echo "✔ API_TOKEN: $API_TOKEN"
-echo "------------------------------------------------------------"
+echo "✔ Deployment complete: http://$VM_IP"
