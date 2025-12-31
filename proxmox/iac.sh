@@ -19,30 +19,25 @@ command -v qm >/dev/null || { echo "ERROR: Must run on Proxmox host."; exit 1; }
 VMID=$(pvesh get /cluster/nextid)
 echo "▶ Using VMID: $VMID"
 
-# Create VM
+# Create VM with correct disk allocation
 qm create $VMID \
     --name $VM_NAME \
     --cores $CORES \
     --memory $MEMORY \
     --net0 virtio,bridge=$BRIDGE \
     --scsihw virtio-scsi-pci \
-    --scsi0 $STORAGE:${DISK}G \
+    --scsi0 $STORAGE:0,format=qcow2,size=${DISK}G \
     --boot c --bootdisk scsi0 \
     --ide2 $ISO_TEMPLATE,media=cdrom
 
 echo "▶ VM created. Start it and complete Ubuntu installation manually or via cloud-init."
 
-# Note: After OS install, use SSH or cloud-init to continue automated deployment
-
-# Once VM is up, deploy IaC stack (example assumes SSH access)
-echo "▶ Deploying IaC stack inside VM..."
-
-# Generate random credentials
+# Generate random credentials for IaC stack
 ADMIN_PASS=$(openssl rand -base64 16)
 API_TOKEN=$(openssl rand -hex 16)
 
-read -p "Enter VM IP address: " VM_IP
-SSH_USER="ubuntu"  # default user on Ubuntu cloud-init install
+read -p "Enter VM IP address after installation: " VM_IP
+SSH_USER="ubuntu"  # default user on Ubuntu live-server install
 
 ssh $SSH_USER@$VM_IP bash -s <<EOF
 set -e
@@ -63,7 +58,7 @@ cd /opt
 sudo git clone https://github.com/jasonmcmullen/IaC.git
 cd IaC
 
-# Write .env
+# Write .env with credentials
 cat > .env <<EOV
 ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
