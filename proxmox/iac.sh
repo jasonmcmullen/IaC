@@ -3,77 +3,81 @@ set -euo pipefail
 
 ### --- CONFIG ---
 VM_NAME="iac-vm"
-STORAGE="local-lvm"       # VM Disk Storage
-ISO_STORAGE="local"       # ISO Storage ID
+STORAGE="local-lvm"
+ISO_STORAGE="local"
 BRIDGE="vmbr0"
-DISK_SIZE="16"            # GB (No 'G' suffix)
+DISK_SIZE="16"            
 MEMORY="4096"
 CORES="2"
 ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
 ISO_URL="https://releases.ubuntu.com/22.04/$ISO_NAME"
 ### --------------
 
-# 1. FIX ISO STORAGE PATHING
-# We must ensure the file is in /var/lib/vz/template/iso/
-# regardless of what the script thought earlier.
+# 1. ISO READINESS VALIDATION
 EXPECTED_ISO_DIR="/var/lib/vz/template/iso"
 mkdir -p "$EXPECTED_ISO_DIR"
-
-# Ensure Proxmox allows ISOs on this storage
-pvesm set "$ISO_STORAGE" --content iso 2>/dev/null || true
-
 ISO_PATH="$EXPECTED_ISO_DIR/$ISO_NAME"
 
-if [ ! -f "$ISO_PATH" ]; then
-    echo "▶ ISO not found at $ISO_PATH. Downloading..."
-    wget -O "$ISO_PATH" "$ISO_URL"
+echo "▶ Validating ISO Readiness..."
+
+# Check if file exists and has a healthy size (> 1GB)
+if [ -f "$ISO_PATH" ]; then
+    FILE_SIZE=$(stat -c%s "$ISO_PATH")
+    if [ "$FILE_SIZE" -lt 1000000000 ]; then
+        echo "× ISO is corrupt or empty (Size: $FILE_SIZE bytes). Deleting..."
+        rm "$ISO_PATH"
+    else
+        echo "✔ ISO is ready and verified."
+    fi
 fi
 
-# 2. GET NEXT VMID
+if [ ! -f "$ISO_PATH" ]; then
+    echo "▶ ISO missing. Downloading now (this may take a few minutes)..."
+    wget -q --show-progress -O "$ISO_PATH" "$ISO_URL"
+    echo "✔ Download complete."
+fi
+
+# 2. VM PROVISIONING
 VMID=$(pvesh get /cluster/nextid)
-echo "▶ Using VMID: $VMID"
+echo "▶ Provisioning VMID: $VMID"
 
-# 3. CREATE VM (Base)
-# We don't attach the disk in 'create' to avoid the LVM parse error
-qm create $VMID \
-    --name "$VM_NAME" \
-    --cores "$CORES" \
-    --memory "$MEMORY" \
-    --net0 virtio,bridge="$BRIDGE" \
-    --scsihw virtio-scsi-pci \
-    --onboot 1
+qm create $VMID --name "$VM_NAME" --cores "$CORES" --memory "$MEMORY" \
+    --net0 virtio,bridge="$BRIDGE" --scsihw virtio-scsi-pci --onboot 1
 
-# 4. ALLOCATE DISK (The "16G" fix)
-# By passing only the number, we avoid the LVM parsing bug
-echo "▶ Creating $DISK_SIZE GB disk on $STORAGE..."
+echo "▶ Allocating $DISK_SIZE GB disk..."
 qm set $VMID --scsi0 "$STORAGE:$DISK_SIZE"
 
-# 5. ATTACH ISO (The "volume does not exist" fix)
-# We use the explicit path-based attachment if the label fails
-echo "▶ Attaching ISO..."
+echo "▶ Mounting ISO and configuring boot..."
 qm set $VMID --ide2 "$ISO_STORAGE:iso/$ISO_NAME,media=cdrom"
-
-# 6. BOOT CONFIG
 qm set $VMID --boot order="ide2;scsi0"
 
-# Start the VM
+# 3. INTERACTIVE INSTALLATION PHASE
+echo "▶ Starting VM..."
 qm start $VMID
 
 echo "------------------------------------------------------------"
-echo "✔ VM $VMID created and started."
-echo "✔ Please complete the Ubuntu installation via the Proxmox Console."
+echo "STEP 1: Open the Proxmox Console for VM $VMID."
+echo "STEP 2: Install Ubuntu. (Tip: Use the default 'ubuntu' user)."
+echo "STEP 3: Once finished, the VM will reboot."
 echo "------------------------------------------------------------"
+read -p "Press [Enter] once the OS is installed and you are at the login screen..."
 
-# Generate Credentials
+# 4. REMOTE DEPLOYMENT (SSH WAIT)
+read -p "Enter the VM's IP address: " VM_IP
+SSH_USER="ubuntu"
+
+echo -n "▶ Waiting for SSH service on $VM_IP ."
+until nc -z -w3 "$VM_IP" 22 >/dev/null 2>&1; do
+    echo -n "."
+    sleep 5
+done
+echo -e "\n✔ Connected!"
+
+# 5. STACK DEPLOYMENT
 ADMIN_PASS=$(openssl rand -base64 12)
 API_TOKEN=$(openssl rand -hex 16)
 
-read -p "Enter VM IP address after install: " VM_IP
-SSH_USER="ubuntu"
-
-echo "▶ Deploying IaC to $VM_IP..."
-until nc -zvw3 "$VM_IP" 22 2>/dev/null; do sleep 5; done
-
+echo "▶ Running remote IaC deployment..."
 ssh -o StrictHostKeyChecking=no "$SSH_USER@$VM_IP" bash -s <<EOF
 set -e
 sudo apt update && sudo apt install -y git curl
@@ -87,4 +91,14 @@ echo "API_TOKEN=${API_TOKEN}" >> .env
 sudo docker compose up -d
 EOF
 
-echo "✔ Deployment complete: http://$VM_IP"
+# 6. POST-DEPLOYMENT CLEANUP
+echo "▶ Cleaning up VM hardware (removing installer ISO)..."
+qm set $VMID --ide2 none,media=cdrom
+qm set $VMID --boot order="scsi0"
+
+echo "------------------------------------------------------------"
+echo "✔ COMPLETE!"
+echo "✔ URL: http://$VM_IP"
+echo "✔ ADMIN_PASS: $ADMIN_PASS"
+echo "✔ API_TOKEN: $API_TOKEN"
+echo "------------------------------------------------------------"
