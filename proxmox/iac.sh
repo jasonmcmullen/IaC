@@ -5,7 +5,7 @@ set -euo pipefail
 VM_NAME="iac-vm"
 STORAGE="local-lvm"   # LVM thin pool
 BRIDGE="vmbr0"
-DISK=16               # GB, **number only** for LVM
+DISK=16               # GB (number only)
 MEMORY=4096           # MB
 CORES=2
 ISO_TEMPLATE="local:iso/ubuntu-22.04.3-live-server-amd64.iso"
@@ -30,8 +30,8 @@ qm create $VMID \
     --ide2 $ISO_TEMPLATE,media=cdrom \
     --onboot 1
 
-# Add LVM disk (size as number only, no 'G')
-qm set $VMID --scsi0 $STORAGE:$DISK
+# Create LVM disk using qm disk create
+qm disk create $VMID scsi0 $STORAGE --size $DISK
 
 # Start VM
 qm start $VMID
