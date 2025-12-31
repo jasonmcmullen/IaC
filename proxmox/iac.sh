@@ -50,21 +50,25 @@ echo "▶ Generated credentials:"
 echo "Admin password: $ADMIN_PASS"
 echo "API token: $API_TOKEN"
 
-# Install Docker + Compose plugin and deploy IaC
+# Self-contained container setup and IaC deployment
 pct exec $CTID -- bash -c "
 set -e
+
+# Remove any legacy docker-compose binaries from template
+rm -f /usr/bin/docker-compose /usr/local/bin/docker-compose || true
+
+# Install dependencies
 apt update
 apt install -y ca-certificates curl gnupg lsb-release git
 
-# Install Docker official repo
+# Install Docker from official Docker repository
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo \
-  \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" \
-  > /etc/apt/sources.list.d/docker.list
-
+echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" > /etc/apt/sources.list.d/docker.list
 apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Enable Docker
 systemctl enable docker
 
 # Deploy IaC stack
@@ -79,7 +83,7 @@ ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
 EOF
 
-# Start stack using Docker Compose plugin
+# Deploy using Docker Compose plugin
 docker compose up -d
 "
 
