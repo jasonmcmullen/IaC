@@ -54,7 +54,7 @@ echo "API token: $API_TOKEN"
 pct exec $CTID -- bash -c "
 set -e
 apt update
-apt install -y docker.io docker-compose git
+apt install -y docker.io docker-compose-plugin git
 systemctl enable docker
 mkdir -p /opt
 cd /opt
@@ -67,7 +67,8 @@ ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
 EOF
 
-docker-compose up -d
+# Use modern Docker Compose plugin
+docker compose up -d
 "
 
 echo "✔ IaC deployment complete"
