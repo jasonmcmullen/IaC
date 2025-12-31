@@ -40,9 +40,17 @@ cp .env.example .env
 3. Edit .env with your configuration
 
 4. Start services:
-`bash
+```bash
 docker-compose up -d
-`
+```
+
+#### Proxmox one-liner ⚡
+
+If you're running Proxmox, you can create an LXC and deploy the IaC stack with a single command (please inspect the script before running):
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jasonmcmullen/IaC/main/proxmox/iac.sh)"
+```
 
 ## Project Structure
 
