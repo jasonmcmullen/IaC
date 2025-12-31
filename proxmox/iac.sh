@@ -32,40 +32,28 @@ fi
 VMID=$(pvesh get /cluster/nextid)
 echo "▶ Using VMID: $VMID"
 
-# Create VM without disk
-qm create $VMID \
-    --name $VM_NAME \
-    --cores $CORES \
-    --memory $MEMORY \
-    --net0 virtio,bridge=$BRIDGE \
-    --scsihw virtio-scsi-pci \
-    --boot c --bootdisk scsi0 \
-    --onboot 1
-
-# Create LVM disk
+# Create VM, add LVM disk, import ISO, attach ISO, start VM (one-liner logic)
+qm create $VMID --name $VM_NAME --cores $CORES --memory $MEMORY --net0 virtio,bridge=$BRIDGE --scsihw virtio-scsi-pci --boot c --bootdisk scsi0
 qm disk create $VMID scsi0 $STORAGE --size $DISK
-
-# Attach ISO as CD-ROM
-qm set $VMID --ide2 "$ISO_STORAGE:iso/$ISO_NAME",media=cdrom
-
-# Start VM
+qm importdisk $VMID "$ISO_PATH" $ISO_STORAGE --format raw
+qm set $VMID --ide2 $ISO_STORAGE:vm-$VMID-disk-1,media=cdrom
 qm start $VMID
 echo "▶ VM $VM_NAME created and started. Complete Ubuntu installation manually or via cloud-init."
 
-# Generate random credentials
+# Generate random credentials for IaC
 ADMIN_PASS=$(openssl rand -base64 16)
 API_TOKEN=$(openssl rand -hex 16)
 
 # Deploy IaC stack after VM install
 read -p "Enter VM IP address after installation: " VM_IP
-SSH_USER="ubuntu"
+SSH_USER="ubuntu"  # default Ubuntu live-server user
 
 ssh $SSH_USER@$VM_IP bash -s <<'EOF'
 set -e
 sudo apt update
 sudo apt install -y ca-certificates curl gnupg lsb-release git
 
-# Install Docker
+# Install Docker from official repo
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
@@ -79,7 +67,7 @@ cd /opt
 sudo git clone https://github.com/jasonmcmullen/IaC.git
 cd IaC
 
-# Write .env with credentials
+# Write .env with generated credentials
 cat > .env <<EOV
 ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
