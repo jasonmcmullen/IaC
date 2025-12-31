@@ -29,14 +29,14 @@ if ! ls /var/lib/vz/template/cache/$OS &>/dev/null; then
     pveam download local "$OS"
 fi
 
-# Create container
+# Create **privileged** container to allow Docker to run
 pct create $CTID local:vztmpl/$OS \
     --hostname $HOSTNAME \
     --cores $CORES \
     --memory $MEMORY \
     --rootfs $STORAGE:$DISK \
     --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
-    --unprivileged 1 \
+    --unprivileged 0 \
     --features nesting=1,keyctl=1 \
     --onboot 1
 
@@ -76,7 +76,7 @@ ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
 EOF
 
-# Start stack with modern Docker Compose plugin
+# Start stack with Docker Compose plugin
 docker compose up -d
 "
 
