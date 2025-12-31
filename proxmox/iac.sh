@@ -42,7 +42,8 @@ qm create $VMID \
     --boot c --bootdisk scsi0 \
     --onboot 1
 
-# Create LVM disk (Proxmox 7.x syntax)
+# --- Proxmox 7.x compatibility fix ---
+# Replaces 'qm disk create', which does not exist in 7.x
 qm set $VMID --scsi0 $STORAGE:${DISK}G
 
 # Import ISO into Proxmox storage
