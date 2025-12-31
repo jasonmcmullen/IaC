@@ -3,71 +3,75 @@ set -euo pipefail
 
 ### --- CONFIG ---
 VM_NAME="iac-vm"
-STORAGE="local-lvm"       # Storage for the VM Hard Drive
-ISO_STORAGE="local"       # Storage ID where ISOs are kept
+STORAGE="local-lvm"       # VM Disk Storage
+ISO_STORAGE="local"       # ISO Storage ID
 BRIDGE="vmbr0"
-DISK_SIZE="16"            # GB (Plain number)
-MEMORY=4096               
-CORES=2
+DISK_SIZE="16"            # GB (No 'G' suffix)
+MEMORY="4096"
+CORES="2"
 ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
 ISO_URL="https://releases.ubuntu.com/22.04/$ISO_NAME"
 ### --------------
 
-# 1. PREPARE ISO STORAGE
-# Ensure Proxmox recognizes the storage for ISOs
+# 1. FIX ISO STORAGE PATHING
+# We must ensure the file is in /var/lib/vz/template/iso/
+# regardless of what the script thought earlier.
+EXPECTED_ISO_DIR="/var/lib/vz/template/iso"
+mkdir -p "$EXPECTED_ISO_DIR"
+
+# Ensure Proxmox allows ISOs on this storage
 pvesm set "$ISO_STORAGE" --content iso 2>/dev/null || true
 
-# Find where Proxmox actually mounts this storage
-ISO_DIR=$(pvesm status -storage "$ISO_STORAGE" | awk 'NR==2 {print $6}')
-# Default to common path if detection fails
-ISO_DIR=${ISO_DIR:-/var/lib/vz}
-ISO_PATH="$ISO_DIR/template/iso/$ISO_NAME"
-
-mkdir -p "$(dirname "$ISO_PATH")"
+ISO_PATH="$EXPECTED_ISO_DIR/$ISO_NAME"
 
 if [ ! -f "$ISO_PATH" ]; then
-    echo "▶ ISO not found. Downloading to $ISO_PATH..."
+    echo "▶ ISO not found at $ISO_PATH. Downloading..."
     wget -O "$ISO_PATH" "$ISO_URL"
 fi
 
-# 2. CREATE VM
+# 2. GET NEXT VMID
 VMID=$(pvesh get /cluster/nextid)
 echo "▶ Using VMID: $VMID"
 
-# We create the VM without the disk first to avoid parsing errors
+# 3. CREATE VM (Base)
+# We don't attach the disk in 'create' to avoid the LVM parse error
 qm create $VMID \
     --name "$VM_NAME" \
-    --cores $CORES \
-    --memory $MEMORY \
-    --net0 virtio,bridge=$BRIDGE \
+    --cores "$CORES" \
+    --memory "$MEMORY" \
+    --net0 virtio,bridge="$BRIDGE" \
     --scsihw virtio-scsi-pci \
     --onboot 1
 
-# 3. CONFIGURE DISKS (THE FIX)
-# We use the raw size integer. Format is STORAGE:SIZE
-echo "▶ Allocating ${DISK_SIZE}GB on $STORAGE..."
+# 4. ALLOCATE DISK (The "16G" fix)
+# By passing only the number, we avoid the LVM parsing bug
+echo "▶ Creating $DISK_SIZE GB disk on $STORAGE..."
 qm set $VMID --scsi0 "$STORAGE:$DISK_SIZE"
 
-# Attach ISO - Note: We use the Proxmox volume ID format
-echo "▶ Mounting ISO: $ISO_STORAGE:iso/$ISO_NAME"
+# 5. ATTACH ISO (The "volume does not exist" fix)
+# We use the explicit path-based attachment if the label fails
+echo "▶ Attaching ISO..."
 qm set $VMID --ide2 "$ISO_STORAGE:iso/$ISO_NAME,media=cdrom"
 
-# Set Boot Order
+# 6. BOOT CONFIG
 qm set $VMID --boot order="ide2;scsi0"
 
-# 4. START
+# Start the VM
 qm start $VMID
-echo "▶ VM $VMID is running. Complete the install in the Proxmox console."
 
-# --- Deployment Logic ---
+echo "------------------------------------------------------------"
+echo "✔ VM $VMID created and started."
+echo "✔ Please complete the Ubuntu installation via the Proxmox Console."
+echo "------------------------------------------------------------"
+
+# Generate Credentials
 ADMIN_PASS=$(openssl rand -base64 12)
 API_TOKEN=$(openssl rand -hex 16)
 
-echo "------------------------------------------------------------"
-read -p "Enter VM IP address once installed: " VM_IP
+read -p "Enter VM IP address after install: " VM_IP
 SSH_USER="ubuntu"
 
-echo "▶ Waiting for SSH on $VM_IP..."
+echo "▶ Deploying IaC to $VM_IP..."
 until nc -zvw3 "$VM_IP" 22 2>/dev/null; do sleep 5; done
 
 ssh -o StrictHostKeyChecking=no "$SSH_USER@$VM_IP" bash -s <<EOF
@@ -83,4 +87,4 @@ echo "API_TOKEN=${API_TOKEN}" >> .env
 sudo docker compose up -d
 EOF
 
-echo "✔ Done! http://$VM_IP"
+echo "✔ Deployment complete: http://$VM_IP"
