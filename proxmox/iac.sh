@@ -10,15 +10,19 @@ MEMORY=4096               # MB
 CORES=2
 ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
 ISO_URL="https://releases.ubuntu.com/22.04/$ISO_NAME"
-ISO_STORAGE="local"       # file storage for ISO
-SSH_KEY=""                # optional: insert your public key here
+ISO_STORAGE_PATH="/var/lib/vz/template/iso"
+ISO_STORAGE="local"       # Proxmox ISO storage
+SSH_KEY=""                # optional
 ### --------------
 
 # Ensure Proxmox CLI is available
 command -v qm >/dev/null || { echo "ERROR: Must run on Proxmox host."; exit 1; }
 
+# Create ISO storage directory if missing
+mkdir -p "$ISO_STORAGE_PATH"
+
 # Download ISO if missing
-ISO_PATH="/var/lib/vz/template/iso/$ISO_NAME"
+ISO_PATH="$ISO_STORAGE_PATH/$ISO_NAME"
 if [ ! -f "$ISO_PATH" ]; then
     echo "▶ ISO not found. Downloading $ISO_NAME..."
     wget -O "$ISO_PATH" "$ISO_URL"
@@ -41,8 +45,8 @@ qm create $VMID \
 # Create LVM disk
 qm disk create $VMID scsi0 $STORAGE --size $DISK
 
-# Attach ISO properly
-qm set $VMID --ide2 $ISO_STORAGE:iso/$ISO_NAME,media=cdrom
+# Attach ISO as CD-ROM
+qm set $VMID --ide2 "$ISO_STORAGE:iso/$ISO_NAME",media=cdrom
 
 # Start VM
 qm start $VMID
@@ -54,14 +58,14 @@ API_TOKEN=$(openssl rand -hex 16)
 
 # Deploy IaC stack after VM install
 read -p "Enter VM IP address after installation: " VM_IP
-SSH_USER="ubuntu"  # default Ubuntu live-server user
+SSH_USER="ubuntu"
 
 ssh $SSH_USER@$VM_IP bash -s <<'EOF'
 set -e
 sudo apt update
 sudo apt install -y ca-certificates curl gnupg lsb-release git
 
-# Install Docker from official repo
+# Install Docker
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
