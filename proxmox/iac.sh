@@ -5,7 +5,7 @@ set -euo pipefail
 VM_NAME="iac-vm"
 STORAGE="local-lvm"       # LVM thin pool for VM disk
 BRIDGE="vmbr0"
-DISK=16                   # GB (number only)
+DISK=16                   # GB
 MEMORY=4096               # MB
 CORES=2
 ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
@@ -32,11 +32,26 @@ fi
 VMID=$(pvesh get /cluster/nextid)
 echo "▶ Using VMID: $VMID"
 
-# Create VM, add LVM disk, import ISO, attach ISO, start VM (one-liner logic)
-qm create $VMID --name $VM_NAME --cores $CORES --memory $MEMORY --net0 virtio,bridge=$BRIDGE --scsihw virtio-scsi-pci --boot c --bootdisk scsi0
-qm disk create $VMID scsi0 $STORAGE --size $DISK
+# Create VM without disk
+qm create $VMID \
+    --name $VM_NAME \
+    --cores $CORES \
+    --memory $MEMORY \
+    --net0 virtio,bridge=$BRIDGE \
+    --scsihw virtio-scsi-pci \
+    --boot c --bootdisk scsi0 \
+    --onboot 1
+
+# Create LVM disk (Proxmox 7.x syntax)
+qm set $VMID --scsi0 $STORAGE:${DISK}G
+
+# Import ISO into Proxmox storage
 qm importdisk $VMID "$ISO_PATH" $ISO_STORAGE --format raw
+
+# Attach ISO as CD-ROM
 qm set $VMID --ide2 $ISO_STORAGE:vm-$VMID-disk-1,media=cdrom
+
+# Start VM
 qm start $VMID
 echo "▶ VM $VM_NAME created and started. Complete Ubuntu installation manually or via cloud-init."
 
