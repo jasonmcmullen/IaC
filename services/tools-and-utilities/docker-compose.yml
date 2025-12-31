@@ -1,0 +1,164 @@
+version: '3.8'
+
+services:
+  # File Browser - Web-based file management
+  file-browser:
+    image: filebrowser/filebrowser:latest
+    container_name: file-browser
+    networks:
+      - homeserver
+    ports:
+      - "${FILE_BROWSER_PORT}:80"
+    volumes:
+      - ${FILE_BROWSER_ROOT:-/mnt/media}:/srv
+      - file-browser-data:/database
+      - file-browser-config:/config
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    restart: unless-stopped
+    labels:
+      - "com.example.description=File Browser"
+
+  # Vaultwarden - Self-hosted Bitwarden password manager
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    networks:
+      - homeserver
+    ports:
+      - "${VAULTWARDEN_PORT}:80"
+    volumes:
+      - vaultwarden-data:/data
+    environment:
+      - DOMAIN=http://${DOMAIN}:${VAULTWARDEN_PORT}
+      - SIGNUPS_ALLOWED=true
+      - INVITATIONS_ALLOWED=true
+      - SENDS_ALLOWED=true
+      - EMERGENCY_ACCESS_ALLOWED=true
+      - LOG_LEVEL=info
+      - EXTENDED_LOGGING=true
+      - ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN}
+      - TZ=${TZ}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/alive"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Hoarder - Bookmark everything app with AI
+  hoarder:
+    image: ghcr.io/hoarder-app/hoarder:latest
+    container_name: hoarder
+    networks:
+      - homeserver
+    ports:
+      - "${HOARDER_PORT}:3000"
+    volumes:
+      - hoarder-data:/data
+    environment:
+      - TZ=${TZ}
+      - DATABASE_URL=postgresql://hoarder:hoarder@hoarder-db:5432/hoarder
+      - MEILI_URL=http://hoarder-meilisearch:7700
+      - BULL_LOG_LEVEL=info
+    depends_on:
+      hoarder-db:
+        condition: service_healthy
+      hoarder-meilisearch:
+        condition: service_started
+    restart: unless-stopped
+
+  # Hoarder Database
+  hoarder-db:
+    image: postgres:15-alpine
+    container_name: hoarder-db
+    networks:
+      - homeserver
+    volumes:
+      - hoarder-db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=hoarder
+      - POSTGRES_PASSWORD=hoarder
+      - POSTGRES_DB=hoarder
+      - TZ=${TZ}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hoarder"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Hoarder Meilisearch - Search engine
+  hoarder-meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: hoarder-meilisearch
+    networks:
+      - homeserver
+    volumes:
+      - hoarder-meilisearch-data:/meili_data
+    environment:
+      - MEILI_NO_ANALYTICS=true
+    restart: unless-stopped
+
+  # Portainer - Docker container management
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    networks:
+      - homeserver
+    ports:
+      - "${PORTAINER_PORT}:9000"
+      - "${PORTAINER_EDGE_PORT}:8001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    environment:
+      - TZ=${TZ}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # OctoPrint - 3D printer management
+  octoprint:
+    image: octoprint/octoprint:latest
+    container_name: octoprint
+    networks:
+      - homeserver
+    ports:
+      - "${OCTOPRINT_PORT}:5000"
+    volumes:
+      - octoprint-data:/octoprint
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    devices:
+      # Uncomment and modify for your USB printer connection
+      # - /dev/ttyUSB0:/dev/ttyUSB0
+      # - /dev/bus/usb:/dev/bus/usb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  file-browser-data:
+  file-browser-config:
+  vaultwarden-data:
+  hoarder-data:
+  hoarder-db-data:
+  hoarder-meilisearch-data:
+  portainer-data:
+  octoprint-data:
+
+networks:
+  homeserver:
+    driver: bridge
+    name: homeserver

@@ -1,0 +1,239 @@
+# Main Docker Compose File
+# Orchestrates all services across categories
+# Individual service compose files are in services/ subdirectories
+
+version: '3.8'
+
+# Define networks
+networks:
+  homeserver:
+    driver: bridge
+    name: homeserver
+
+# Define volumes for critical data
+volumes:
+  # Tools and Utilities
+  file-browser-data:
+  file-browser-config:
+  vaultwarden-data:
+  hoarder-data:
+  hoarder-db-data:
+  hoarder-meilisearch-data:
+  portainer-data:
+  octoprint-data:
+
+  # Files and Images
+  nextcloud-data:
+  nextcloud-db:
+  immich-data:
+  immich-db:
+  docmost-data:
+
+  # Media Server
+  jellyfin-config:
+  jellyfin-cache:
+  plex-config:
+  tautulli-data:
+
+  # Media Management
+  overseerr-data:
+  radarr-data:
+  sonarr-data:
+  lidarr-data:
+  bazarr-data:
+  prowlarr-data:
+
+  # Download Clients
+  qbittorrent-config:
+  qbittorrent-downloads:
+  nzbget-config:
+  nzbget-downloads:
+
+  # DNS and Connections
+  pihole-etc:
+  pihole-dnsmasq:
+  nginx-data:
+  nginx-ssl:
+  nginx-db:
+  cloudflare-ddns-data:
+
+  # Smart Home
+  homeassistant-config:
+  frigate-config:
+  frigate-clips:
+  zigbee2mqtt-data:
+
+  # Data and Metrics
+  prometheus-data:
+  grafana-data:
+  grafana-provisioning:
+  influxdb-data:
+  teslamate-data:
+  teslamate-db:
+
+services:
+  # ============================================
+  # TOOLS AND UTILITIES
+  # ============================================
+
+  file-browser:
+    image: filebrowser/filebrowser:latest
+    container_name: file-browser
+    networks:
+      - homeserver
+    ports:
+      - "${FILE_BROWSER_PORT:-8080}:80"
+    volumes:
+      - ${FILE_BROWSER_ROOT:-/mnt/media}:/srv
+      - file-browser-data:/database
+      - file-browser-config:/config
+    environment:
+      - TZ=${TZ:-UTC}
+    restart: unless-stopped
+
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    networks:
+      - homeserver
+    ports:
+      - "${VAULTWARDEN_PORT:-8000}:80"
+    volumes:
+      - vaultwarden-data:/data
+    environment:
+      - DOMAIN=http://${DOMAIN:-localhost}:${VAULTWARDEN_PORT:-8000}
+      - SIGNUPS_ALLOWED=true
+      - INVITATIONS_ALLOWED=true
+      - ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN}
+      - LOG_LEVEL=${VAULTWARDEN_LOG_LEVEL:-info}
+      - TZ=${TZ:-UTC}
+    restart: unless-stopped
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    networks:
+      - homeserver
+    ports:
+      - "${PORTAINER_PORT:-9000}:9000"
+      - "${PORTAINER_EDGE_PORT:-8001}:8001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    environment:
+      - TZ=${TZ:-UTC}
+    restart: unless-stopped
+
+  # ============================================
+  # DASHBOARDS
+  # ============================================
+  # Uncomment to enable specific dashboard services
+  # See services/dashboards/docker-compose.yml
+
+  # ============================================
+  # MEDIA SERVER
+  # ============================================
+  # Uncomment and configure for media services
+  # See services/media-server/docker-compose.yml
+
+  # ============================================
+  # FILES AND IMAGES
+  # ============================================
+  # Uncomment and configure for cloud storage
+  # See services/files-and-images/docker-compose.yml
+
+  # ============================================
+  # SMART HOME
+  # ============================================
+  # Uncomment and configure for automation
+  # See services/smart-home/docker-compose.yml
+
+  # ============================================
+  # DNS AND CONNECTIONS
+  # ============================================
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    networks:
+      - homeserver
+    ports:
+      - "${PIHOLE_PORT:-80}:80/tcp"
+      - "${PIHOLE_DNS_PORT:-53}:53/udp"
+      - "${PIHOLE_DNS_PORT:-53}:53/tcp"
+    volumes:
+      - pihole-etc:/etc/pihole/
+      - pihole-dnsmasq:/etc/dnsmasq.d/
+    environment:
+      - TZ=${TZ:-UTC}
+      - WEBPASSWORD=${PIHOLE_ADMIN_PASSWORD}
+      - QUERY_LOGGING=${PIHOLE_QUERY_LOG:-true}
+    restart: unless-stopped
+
+  # ============================================
+  # DATA AND METRICS
+  # ============================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    networks:
+      - homeserver
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./configs/prometheus:/etc/prometheus
+    environment:
+      - TZ=${TZ:-UTC}
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION_DAYS:-365}d'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    networks:
+      - homeserver
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - grafana-provisioning:/etc/grafana/provisioning
+    environment:
+      - TZ=${TZ:-UTC}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=${GRAFANA_DOMAIN:-grafana.local}
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+# ==================================================
+# IMPORTANT NOTES
+# ==================================================
+#
+# 1. This is the main compose file with only core
+#    services. For complete setup, use individual
+#    service compose files in services/ directory:
+#
+#    docker compose -f services/tools-and-utilities/docker-compose.yml up -d
+#    docker compose -f services/media-server/docker-compose.yml up -d
+#    docker compose -f services/dns-and-connections/docker-compose.yml up -d
+#
+# 2. Services are organized by category for easier
+#    management and independent deployment.
+#
+# 3. All services use the 'homeserver' network for
+#    inter-service communication.
+#
+# 4. Named volumes handle data persistence. Backup
+#    regularly using: ./scripts/backup.sh
+#
+# 5. Configure all services via .env file before
+#    starting. Copy .env.example to .env and customize.
+#
+# ==================================================
