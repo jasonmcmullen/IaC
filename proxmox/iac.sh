@@ -8,12 +8,23 @@ BRIDGE="vmbr0"
 DISK=16               # GB (number only)
 MEMORY=4096           # MB
 CORES=2
-ISO_TEMPLATE="local:iso/ubuntu-22.04.3-live-server-amd64.iso"
+ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
+ISO_URL="https://releases.ubuntu.com/22.04/$ISO_NAME"
+ISO_STORAGE="local"   # Proxmox storage where ISO is stored
 SSH_KEY=""            # optional: insert your public key here
 ### --------------
 
 # Ensure running on Proxmox
 command -v qm >/dev/null || { echo "ERROR: Must run on Proxmox host."; exit 1; }
+
+# Download ISO if missing
+ISO_PATH="/var/lib/vz/template/iso/$ISO_NAME"
+if [ ! -f "$ISO_PATH" ]; then
+    echo "▶ ISO not found. Downloading $ISO_NAME..."
+    wget -O "$ISO_PATH" "$ISO_URL"
+fi
+
+ISO_TEMPLATE="$ISO_STORAGE:iso/$ISO_NAME"
 
 # Select next free VMID
 VMID=$(pvesh get /cluster/nextid)
