@@ -5,7 +5,7 @@ set -euo pipefail
 VM_NAME="iac-vm"
 STORAGE="local-lvm"   # LVM thin pool
 BRIDGE="vmbr0"
-DISK=16               # GB
+DISK=16               # GB, **number only** for LVM
 MEMORY=4096           # MB
 CORES=2
 ISO_TEMPLATE="local:iso/ubuntu-22.04.3-live-server-amd64.iso"
@@ -19,7 +19,7 @@ command -v qm >/dev/null || { echo "ERROR: Must run on Proxmox host."; exit 1; }
 VMID=$(pvesh get /cluster/nextid)
 echo "▶ Using VMID: $VMID"
 
-# Create VM without disk (LVM disk added separately)
+# Create VM without disk
 qm create $VMID \
     --name $VM_NAME \
     --cores $CORES \
@@ -30,7 +30,7 @@ qm create $VMID \
     --ide2 $ISO_TEMPLATE,media=cdrom \
     --onboot 1
 
-# Add LVM disk
+# Add LVM disk (size as number only, no 'G')
 qm set $VMID --scsi0 $STORAGE:$DISK
 
 # Start VM
