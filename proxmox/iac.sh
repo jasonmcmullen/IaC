@@ -2,84 +2,76 @@
 set -euo pipefail
 
 ### --- CONFIG ---
-HOSTNAME="iac"
+VM_NAME="iac-vm"
 STORAGE="local-lvm"
 BRIDGE="vmbr0"
-DISK=16
-MEMORY=4096
+DISK=16      # GB
+MEMORY=4096  # MB
 CORES=2
+ISO_TEMPLATE="local:iso/ubuntu-22.04.3-live-server-amd64.iso"
+SSH_KEY=""   # optional: insert your public key here
 ### --------------
 
 # Ensure running on Proxmox
-command -v pct >/dev/null || { echo "ERROR: Must run on Proxmox host."; exit 1; }
+command -v qm >/dev/null || { echo "ERROR: Must run on Proxmox host."; exit 1; }
 
-# Select next free CTID
-CTID=$(pvesh get /cluster/nextid)
-echo "▶ Using CTID: $CTID"
+# Select next free VMID
+VMID=$(pvesh get /cluster/nextid)
+echo "▶ Using VMID: $VMID"
 
-# Pick latest Ubuntu LTS template
-echo "▶ Selecting latest Ubuntu LTS template..."
-pveam update
-OS=$(pveam available | awk '/ubuntu/ && /standard/ && /amd64/ && /2[02468]\.04/ {print $2}' | sort -V | tail -n1)
-if [[ -z "$OS" ]]; then echo "ERROR: No Ubuntu LTS template found."; exit 1; fi
-echo "▶ Template: $OS"
-
-# Download template if missing
-if ! ls /var/lib/vz/template/cache/$OS &>/dev/null; then
-    pveam download local "$OS"
-fi
-
-# Create **privileged** container to allow Docker to run
-pct create $CTID local:vztmpl/$OS \
-    --hostname $HOSTNAME \
+# Create VM
+qm create $VMID \
+    --name $VM_NAME \
     --cores $CORES \
     --memory $MEMORY \
-    --rootfs $STORAGE:$DISK \
-    --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
-    --unprivileged 0 \
-    --features nesting=1,keyctl=1 \
-    --onboot 1
+    --net0 virtio,bridge=$BRIDGE \
+    --scsihw virtio-scsi-pci \
+    --scsi0 $STORAGE:${DISK}G \
+    --boot c --bootdisk scsi0 \
+    --ide2 $ISO_TEMPLATE,media=cdrom
 
-pct start $CTID
+echo "▶ VM created. Start it and complete Ubuntu installation manually or via cloud-init."
+
+# Note: After OS install, use SSH or cloud-init to continue automated deployment
+
+# Once VM is up, deploy IaC stack (example assumes SSH access)
+echo "▶ Deploying IaC stack inside VM..."
 
 # Generate random credentials
 ADMIN_PASS=$(openssl rand -base64 16)
 API_TOKEN=$(openssl rand -hex 16)
 
-echo "▶ Generated credentials:"
-echo "Admin password: $ADMIN_PASS"
-echo "API token: $API_TOKEN"
+read -p "Enter VM IP address: " VM_IP
+SSH_USER="ubuntu"  # default user on Ubuntu cloud-init install
 
-# Install Docker + Compose plugin and deploy IaC
-pct exec $CTID -- bash -c "
+ssh $SSH_USER@$VM_IP bash -s <<EOF
 set -e
-apt update
-apt install -y ca-certificates curl gnupg lsb-release git
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg lsb-release git
 
 # Install Docker from official repo
-mkdir -p /etc/apt/keyrings
+sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" > /etc/apt/sources.list.d/docker.list
-apt update
-apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable docker
+echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable docker
 
 # Deploy IaC stack
-mkdir -p /opt
+sudo mkdir -p /opt
 cd /opt
-git clone https://github.com/jasonmcmullen/IaC.git
+sudo git clone https://github.com/jasonmcmullen/IaC.git
 cd IaC
 
-# Write .env automatically
-cat > .env <<EOF
+# Write .env
+cat > .env <<EOV
 ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
+EOV
+
+# Start stack
+sudo docker compose up -d
 EOF
 
-# Start stack with Docker Compose plugin
-docker compose up -d
-"
-
-echo "✔ IaC deployment complete"
-echo "✔ Container ID: $CTID"
-echo "✔ Credentials saved inside container at /opt/IaC/.env"
+echo "✔ IaC deployment complete on VM $VM_NAME ($VM_IP)"
+echo "✔ Credentials: ADMIN_PASSWORD=$ADMIN_PASS, API_TOKEN=$API_TOKEN"
