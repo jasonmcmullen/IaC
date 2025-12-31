@@ -5,7 +5,7 @@ set -euo pipefail
 VM_NAME="iac-vm"
 STORAGE="local-lvm"       # LVM thin pool for VM disk
 BRIDGE="vmbr0"
-DISK=16                   # GB
+DISK=16                   # GB, number only
 MEMORY=4096               # MB
 CORES=2
 ISO_NAME="ubuntu-22.04.3-live-server-amd64.iso"
@@ -43,8 +43,8 @@ qm create $VMID \
     --onboot 1
 
 # --- Proxmox 7.x compatibility fix ---
-# Replaces 'qm disk create', which does not exist in 7.x
-qm set $VMID --scsi0 $STORAGE:${DISK}G
+# Correct LVM disk creation: number only, no 'G'
+qm set $VMID --scsi0 $STORAGE:$DISK
 
 # Import ISO into Proxmox storage
 qm importdisk $VMID "$ISO_PATH" $ISO_STORAGE --format raw
