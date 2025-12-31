@@ -54,6 +54,7 @@ echo "API token: $API_TOKEN"
 pct exec $CTID -- bash -c "
 set -e
 apt update
+# Install Docker + Compose plugin, no legacy python-based docker-compose
 apt install -y docker.io docker-compose-plugin git
 systemctl enable docker
 mkdir -p /opt
@@ -67,7 +68,7 @@ ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
 EOF
 
-# Use modern Docker Compose plugin
+# Deploy stack using Docker Compose plugin
 docker compose up -d
 "
 
