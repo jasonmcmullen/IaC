@@ -50,13 +50,24 @@ echo "▶ Generated credentials:"
 echo "Admin password: $ADMIN_PASS"
 echo "API token: $API_TOKEN"
 
-# Deploy IaC inside container
+# Install Docker + Compose plugin and deploy IaC
 pct exec $CTID -- bash -c "
 set -e
 apt update
-# Install Docker + Compose plugin, no legacy python-based docker-compose
-apt install -y docker.io docker-compose-plugin git
+apt install -y ca-certificates curl gnupg lsb-release git
+
+# Install Docker official repo
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" \
+  > /etc/apt/sources.list.d/docker.list
+
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable docker
+
+# Deploy IaC stack
 mkdir -p /opt
 cd /opt
 git clone https://github.com/jasonmcmullen/IaC.git
@@ -68,7 +79,7 @@ ADMIN_PASSWORD=${ADMIN_PASS}
 API_TOKEN=${API_TOKEN}
 EOF
 
-# Deploy stack using Docker Compose plugin
+# Start stack using Docker Compose plugin
 docker compose up -d
 "
 
